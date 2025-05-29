@@ -68,8 +68,24 @@ class CacheManagementService:
             summary = get_text(root, 'summary', None)
 
             # Calculate file size
-            cache_file = synthesis_path.with_suffix('.safetensors')
-            file_size_mb = cache_file.stat().st_size / (1024 * 1024) if cache_file.exists() else 0
+            # Fix: Remove .synthesis from the filename before adding .safetensors
+            cache_filename = synthesis_path.stem  # This gets "large_cache.synthesis"
+            if cache_filename.endswith('.synthesis'):
+                cache_filename = cache_filename[:-10]  # Remove ".synthesis"
+            cache_file = synthesis_path.parent / f"{cache_filename}.safetensors"
+
+            # Debug logging
+            logger.debug(f"Synthesis path: {synthesis_path}")
+            logger.debug(f"Cache file path: {cache_file}")
+            logger.debug(f"Cache file exists: {cache_file.exists()}")
+
+            if cache_file.exists():
+                file_size_bytes = cache_file.stat().st_size
+                file_size_mb = file_size_bytes / (1024 * 1024)
+                logger.debug(f"File size: {file_size_bytes} bytes ({file_size_mb} MB)")
+            else:
+                file_size_mb = 0
+                logger.warning(f"Cache file not found: {cache_file}")
 
             return CacheMetadata(
                 prompt_text=summary[:500] if summary else None,

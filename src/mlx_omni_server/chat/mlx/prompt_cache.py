@@ -80,17 +80,35 @@ class PromptCache:
         """Load pre-computed cache from safetensor file"""
         try:
             from mlx_lm.models.cache import load_prompt_cache
+            import mlx.core as mx
 
-            # Load cache data
+            # Load cache data - this returns a list of KVCache objects
             cache_data = load_prompt_cache(cache_path)
 
-            # Extract tokens from cache metadata if available
-            if hasattr(cache_data, 'metadata'):
-                self.tokens = cache_data.metadata.get('tokens', [])
-                self.cached_token_count = len(self.tokens)
-
+            # Assign the loaded cache
             self.cache = cache_data
-            logger.info(f"Loaded pre-computed cache with {self.cached_token_count} tokens")
+
+            # Calculate the number of cached tokens from the cache dimensions
+            if cache_data and len(cache_data) > 0:
+                # Get the first layer's cache to determine token count
+                first_layer = cache_data[0]
+                if hasattr(first_layer, 'offset'):
+                    self.cached_token_count = first_layer.offset
+                    # Initialize tokens list with placeholder tokens
+                    self.tokens = list(range(self.cached_token_count))
+                elif hasattr(first_layer, 'keys') and first_layer.keys is not None:
+                    # Fallback: estimate from key tensor shape
+                    # Keys shape is typically (batch, seq_len, num_heads, head_dim)
+                    self.cached_token_count = first_layer.keys.shape[1] if len(first_layer.keys.shape) > 1 else 0
+                    self.tokens = list(range(self.cached_token_count))
+                else:
+                    self.cached_token_count = 0
+                    self.tokens = []
+            else:
+                self.cached_token_count = 0
+                self.tokens = []
+
+            logger.info(f"Loaded pre-computed cache from {cache_path} with {self.cached_token_count} tokens")
             return True
 
         except Exception as e:

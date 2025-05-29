@@ -1,6 +1,7 @@
 import time
 import uuid
 from typing import Any, Dict, Generator, List, Optional
+import json
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -210,13 +211,25 @@ class MLXModel(BaseTextModel):
 
         # Process prompt cache
         tokenized_prompt = tokenizer.encode(prompt)
-        processed_prompt = self._prompt_cache.get_prompt_cache(
-            self._model_id, self._model, tokenized_prompt
-        )
+
+        # Check if we have a precomputed cache
+        if hasattr(self, '_precomputed_cache_path') and self._precomputed_cache_path:
+            # With precomputed cache, we should only process the new prompt
+            # not the cached context
+            processed_prompt = tokenized_prompt
+            self._prompt_cache_tokens_count = self._precomputed_cache_tokens
+            logger.debug(f"Using precomputed cache with {self._precomputed_cache_tokens} tokens")
+        else:
+            # Normal cache processing
+            processed_prompt = self._prompt_cache.get_prompt_cache(
+                self._model_id, self._model, tokenized_prompt
+            )
+            self._prompt_cache_tokens_count = self._prompt_cache.cached_token_count
+            logger.debug(
+                f"Using {self._prompt_cache.cached_token_count} cached tokens out of {len(tokenized_prompt)} total tokens"
+            )
+
         generate_kwargs["prompt_cache"] = self._prompt_cache.cache
-        logger.debug(
-            f"Using {self._prompt_cache.cached_token_count} cached tokens out of {len(tokenized_prompt)} total tokens"
-        )
 
         # Setup stop tokens checker if needed
         stop_checker = None
@@ -324,7 +337,7 @@ class MLXModel(BaseTextModel):
         if success:
             self._precomputed_cache_path = cache_path
             self._precomputed_cache_tokens = self._prompt_cache.cached_token_count
-            logger.info(f"Loaded precomputed cache from {cache_path}")
+            logger.info(f"Loaded precomputed cache from {cache_path} with {self._precomputed_cache_tokens} tokens")
         return success
 
     def _calculate_cache_hit_rate(self) -> float:
@@ -386,6 +399,17 @@ class MLXModel(BaseTextModel):
 
                 prompt_tokens_details = PromptTokensDetails(cached_tokens=cached_tokens)
 
+            # Add cache statistics to system_fingerprint
+            cache_stats = {
+                "precomputed_tokens": self._precomputed_cache_tokens if hasattr(self,
+                                                                                '_precomputed_cache_tokens') else 0,
+                "cache_hit_rate": self._calculate_cache_hit_rate(),
+                "cache_source": "precomputed" if hasattr(self,
+                                                         '_precomputed_cache_path') and self._precomputed_cache_path else "incremental"
+            }
+
+            system_fingerprint = json.dumps(cache_stats)
+
             return ChatCompletionResponse(
                 id=f"chatcmpl-{uuid.uuid4().hex[:10]}",
                 created=int(time.time()),
@@ -412,6 +436,7 @@ class MLXModel(BaseTextModel):
                                  + cached_tokens,
                     prompt_tokens_details=prompt_tokens_details,
                 ),
+                system_fingerprint=system_fingerprint,  # Add cache statistics here
             )
         except Exception as e:
             logger.error(f"Failed to generate completion: {str(e)}", exc_info=True)

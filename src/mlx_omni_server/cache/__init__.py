@@ -1,4 +1,4 @@
-from .router import router
+from .cache import router
 from .manager import CacheManagementService
 from .schema import CacheInfo, CacheListResponse, CacheMetadata, CacheValidationRequest, ValidationResult
 

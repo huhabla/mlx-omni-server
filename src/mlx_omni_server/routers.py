@@ -6,7 +6,7 @@ from .embeddings import router as embeddings_router
 from .images import images
 from .stt import stt as stt_router
 from .tts import tts as tts_router
-from .cache import router as cache_router  # Neuer Import
+from .cache import cache as cache_router
 
 api_router = APIRouter()
 api_router.include_router(stt_router.router)
