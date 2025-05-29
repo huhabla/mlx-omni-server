@@ -76,6 +76,27 @@ class PromptCache:
         #     )
         self.tokens = list(prompt)  # Cache the new prompt fully
 
+    def load_precomputed_cache(self, cache_path: str) -> bool:
+        """Load pre-computed cache from safetensor file"""
+        try:
+            from mlx_lm.models.cache import load_prompt_cache
+
+            # Load cache data
+            cache_data = load_prompt_cache(cache_path)
+
+            # Extract tokens from cache metadata if available
+            if hasattr(cache_data, 'metadata'):
+                self.tokens = cache_data.metadata.get('tokens', [])
+                self.cached_token_count = len(self.tokens)
+
+            self.cache = cache_data
+            logger.info(f"Loaded pre-computed cache with {self.cached_token_count} tokens")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to load pre-computed cache: {e}")
+            return False
+
     def get_prompt_cache(self, current_model_id, current_model, prompt):
         cache_len = len(self.tokens)
         prompt_len = len(prompt)

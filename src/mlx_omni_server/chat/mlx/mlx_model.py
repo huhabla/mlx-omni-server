@@ -41,10 +41,12 @@ class MLXModel(BaseTextModel):
         self._prompt_cache = PromptCache()
         self._prompt_cache_tokens_count = 0
         self._reasoning_decoder = ReasoningDecoder(tokenizer)
+        self._precomputed_cache_path = None
+        self._precomputed_cache_tokens = 0
         logger.info(f"Initialized MLXModel with model_id: {model_id}")
 
     def _get_generation_params(
-        self, request: ChatCompletionRequest
+            self, request: ChatCompletionRequest
     ) -> GenerationParams:
         params = request.get_extra_params()
 
@@ -101,10 +103,10 @@ class MLXModel(BaseTextModel):
         }
 
     def _process_logprobs(
-        self,
-        tokenizer: TokenizerWrapper,
-        response: GenerationResponse,
-        top_k: Optional[int],
+            self,
+            tokenizer: TokenizerWrapper,
+            response: GenerationResponse,
+            top_k: Optional[int],
     ) -> Optional[Dict[str, Any]]:
         """Process logprobs information from generation response to match OpenAI format"""
         current_token = response.token
@@ -140,8 +142,8 @@ class MLXModel(BaseTextModel):
         return {**token_info, "top_logprobs": top_logprobs}
 
     def _prepare_generation(
-        self,
-        request: ChatCompletionRequest,
+            self,
+            request: ChatCompletionRequest,
     ) -> tuple[Any, StopTokensChecker | None, dict[str, Any]]:
         """Prepare all necessary components for generation.
 
@@ -170,16 +172,16 @@ class MLXModel(BaseTextModel):
 
         # Prepare sampler parameters
         sampler_kwargs = {
-            "temp": (
-                self._default_temperature
-                if request.temperature is None
-                else request.temperature
-            ),
-            "top_p": (self._default_top_p if request.top_p is None else request.top_p),
-            "min_p": 0.0,
-            "min_tokens_to_keep": 1,
-            "top_k": self._default_top_k,
-        } | params.get("sampler_kwargs", {})
+                             "temp": (
+                                 self._default_temperature
+                                 if request.temperature is None
+                                 else request.temperature
+                             ),
+                             "top_p": (self._default_top_p if request.top_p is None else request.top_p),
+                             "min_p": 0.0,
+                             "min_tokens_to_keep": 1,
+                             "top_k": self._default_top_k,
+                         } | params.get("sampler_kwargs", {})
 
         logger.debug(f"Sampler kwargs: {sampler_kwargs}")
 
@@ -238,16 +240,16 @@ class MLXModel(BaseTextModel):
 
         # Calculate max tokens for completion
         generate_kwargs["max_tokens"] = (
-            request.max_completion_tokens
-            or request.max_tokens
-            or self._default_max_tokens
+                request.max_completion_tokens
+                or request.max_tokens
+                or self._default_max_tokens
         )
 
         return processed_prompt, stop_checker, generate_kwargs
 
     def _stream_generate(
-        self,
-        request: ChatCompletionRequest,
+            self,
+            request: ChatCompletionRequest,
     ) -> Generator[GenerateResult, None, None]:
         try:
             # Get tokenizer
@@ -262,10 +264,10 @@ class MLXModel(BaseTextModel):
             last_text = ""
 
             for response in stream_generate(
-                model=self._model,
-                tokenizer=tokenizer,
-                prompt=processed_prompt,
-                **generate_kwargs,
+                    model=self._model,
+                    tokenizer=tokenizer,
+                    prompt=processed_prompt,
+                    **generate_kwargs,
             ):
                 if response.finish_reason is not None:
                     break
@@ -286,12 +288,12 @@ class MLXModel(BaseTextModel):
                         finish_reason = "stop"
                         if stop_condition.trim_length > 0:
                             current_tokens = current_tokens[
-                                : -stop_condition.trim_length
-                            ]
+                                             : -stop_condition.trim_length
+                                             ]
                             should_trim = True
 
                 text = tokenizer.decode(current_tokens)
-                delta_text = text[len(last_text) :]
+                delta_text = text[len(last_text):]
 
                 if delta_text or should_trim:
                     yield GenerateResult(
@@ -316,9 +318,25 @@ class MLXModel(BaseTextModel):
             logger.error(f"Error during stream generation: {str(e)}", exc_info=True)
             raise
 
+    def load_precomputed_cache(self, cache_path: str) -> bool:
+        """Load pre-computed cache from file"""
+        success = self._prompt_cache.load_precomputed_cache(cache_path)
+        if success:
+            self._precomputed_cache_path = cache_path
+            self._precomputed_cache_tokens = self._prompt_cache.cached_token_count
+            logger.info(f"Loaded precomputed cache from {cache_path}")
+        return success
+
+    def _calculate_cache_hit_rate(self) -> float:
+        """Calculate cache hit rate for statistics"""
+        if self._prompt_cache.cached_token_count == 0:
+            return 0.0
+        total_tokens = len(self._prompt_cache.tokens)
+        return (self._prompt_cache.cached_token_count / total_tokens) * 100 if total_tokens > 0 else 0.0
+
     def generate(
-        self,
-        request: ChatCompletionRequest,
+            self,
+            request: ChatCompletionRequest,
     ) -> ChatCompletionResponse:
         try:
             completion = ""
@@ -390,8 +408,8 @@ class MLXModel(BaseTextModel):
                     prompt_tokens=result.prompt_tokens + cached_tokens,
                     completion_tokens=result.generation_tokens,
                     total_tokens=result.prompt_tokens
-                    + result.generation_tokens
-                    + cached_tokens,
+                                 + result.generation_tokens
+                                 + cached_tokens,
                     prompt_tokens_details=prompt_tokens_details,
                 ),
             )
@@ -400,8 +418,8 @@ class MLXModel(BaseTextModel):
             raise RuntimeError(f"Failed to generate completion: {str(e)}")
 
     def stream_generate(
-        self,
-        request: ChatCompletionRequest,
+            self,
+            request: ChatCompletionRequest,
     ) -> Generator[ChatCompletionChunk, None, None]:
         try:
             chat_id = f"chatcmpl-{uuid.uuid4().hex[:10]}"
@@ -421,7 +439,7 @@ class MLXModel(BaseTextModel):
                         logger.debug(f"Reasoning result:\n{reasoning_result}")
                         delta_content = reasoning_result.get("delta_content")
                         delta_reasoning = (
-                            reasoning_result.get("delta_reasoning") or None
+                                reasoning_result.get("delta_reasoning") or None
                         )
                         if delta_content:
                             message = ChatMessage(
@@ -479,8 +497,8 @@ class MLXModel(BaseTextModel):
                         prompt_tokens=result.prompt_tokens + cached_tokens,
                         completion_tokens=result.generation_tokens,
                         total_tokens=result.prompt_tokens
-                        + result.generation_tokens
-                        + cached_tokens,
+                                     + result.generation_tokens
+                                     + cached_tokens,
                         prompt_tokens_details=prompt_tokens_details,
                     ),
                 )

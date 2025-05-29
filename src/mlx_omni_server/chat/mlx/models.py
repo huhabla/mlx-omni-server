@@ -27,6 +27,11 @@ def load_tools_handler(model_type: str, tokenizer: TokenizerWrapper) -> ChatToke
 
 def load_model(model_id: str, adapter_path: str = None) -> BaseTextModel:
     """Load a model and tokenizer from the given model ID."""
+    # Parse cache path from model_id if present
+    cache_path = None
+    if "@" in model_id:
+        model_id, cache_path = model_id.split("@", 1)
+
     model, tokenizer = load(
         model_id,
         tokenizer_config={"trust_remote_code": True},
@@ -38,4 +43,11 @@ def load_model(model_id: str, adapter_path: str = None) -> BaseTextModel:
 
     chat_tokenizer = load_tools_handler(config["model_type"], tokenizer)
 
-    return MLXModel(model_id=model_id, model=model, tokenizer=chat_tokenizer)
+    mlx_model = MLXModel(model_id=model_id, model=model, tokenizer=chat_tokenizer)
+
+    # Load pre-computed cache if path provided
+    if cache_path:
+        mlx_model.load_precomputed_cache(cache_path)
+
+    return mlx_model
+
