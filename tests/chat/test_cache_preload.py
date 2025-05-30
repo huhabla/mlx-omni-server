@@ -277,11 +277,22 @@ class TestCacheManagementService:
         with pytest.raises(ET.ParseError):
             service._parse_synthesis_file(bad_xml_file)
 
-    def test_cache_directory_not_exists(self):
-        """Test behavior when cache directory doesn't exist"""
-        service = CacheManagementService("/non/existent/directory")
-        result = service.list_caches()
+    def test_cache_directory_not_exists(self, temp_cache_dir):
+        """Test behavior when cache directory doesn't exist initially"""
+        # Create a path that doesn't exist
+        non_existent_dir = temp_cache_dir / "non_existent_subdirectory"
 
+        # Ensure the directory doesn't exist
+        assert not non_existent_dir.exists()
+
+        # Create service with non-existent directory
+        service = CacheManagementService(str(non_existent_dir))
+
+        # The directory should now exist (created by __init__)
+        assert non_existent_dir.exists()
+
+        # List caches should return empty result
+        result = service.list_caches()
         assert result.total_count == 0
         assert result.caches == []
 

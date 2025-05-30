@@ -44,6 +44,8 @@ dependencies = [
     "mflux>=0.7.1,<0.8",
     # embeddings
     "mlx-embeddings>=0.0.3",
+    "pydantic_settings",
+    "python-dotenv"
 ]
 
 [project.urls]

@@ -4,13 +4,16 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
+from ..config import settings  # Import zentrale Konfiguration
 from ..utils.logger import logger
 from .schema import CacheListResponse, CacheInfo, CacheMetadata, ValidationResult
 
 
 class CacheManagementService:
-    def __init__(self, cache_directory: str = "./caches"):
-        self.cache_dir = Path(cache_directory)
+    def __init__(self, cache_directory: Optional[str] = None):
+        self.cache_dir = Path(cache_directory or settings.cache_directory)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Cache directory initialized: {self.cache_dir}")
 
     def list_caches(self) -> CacheListResponse:
         """List all available caches with their metadata"""

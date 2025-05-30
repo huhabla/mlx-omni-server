@@ -13,11 +13,13 @@ OpenAI-compatible API endpoints, enabling seamless integration with existing Ope
 - 🔌 **OpenAI API Compatible**: Drop-in replacement for OpenAI API endpoints
 - 🎯 **Multiple AI Capabilities**:
     - Audio Processing (TTS & STT)
-    - Chat Completion
+    - Chat Completion with Prompt Caching
     - Image Generation
-- ⚡ **High Performance**: Local inference with hardware acceleration
+    - Text Embeddings
+- ⚡ **High Performance**: Local inference with hardware acceleration and KV cache support
 - 🔐 **Privacy-First**: All processing happens locally on your machine
 - 🛠 **SDK Support**: Works with official OpenAI SDK and other compatible clients
+- 💾 **Advanced Caching**: Pre-computed KV cache support for faster inference
 
 ## Supported API Endpoints
 
@@ -28,6 +30,7 @@ The server implements OpenAI-compatible endpoints:
     - ✅ Tools, Function Calling
     - ✅ Structured Output
     - ✅ LogProbs
+    - ✅ Prompt Caching (KV Cache)
     - 🚧 Vision
 - [Audio](https://platform.openai.com/docs/api-reference/audio)
     - ✅ `/v1/audio/speech` - Text-to-Speech
@@ -39,6 +42,10 @@ The server implements OpenAI-compatible endpoints:
     - ✅ `/v1/images/generations` - Image generation
 - [Embeddings](https://platform.openai.com/docs/api-reference/embeddings)
     - ✅ `/v1/embeddings` - Create embeddings for text
+- [Cache Management](docs/cache_management.md) (MLX Omni Server specific)
+    - ✅ `/v1/caches` - List available pre-computed caches
+    - ✅ `/v1/caches/{cache_id}` - Get cache information
+    - ✅ `/v1/caches/validate` - Validate cache compatibility
 
 
 
@@ -85,9 +92,42 @@ mlx-omni-server
 # Or specify a custom port
 mlx-omni-server --port 8000
 
+# Specify custom cache directory
+mlx-omni-server --cache-dir /path/to/caches
+
 # View all available options
 mlx-omni-server --help
 ```
+
+### Configuration
+
+MLX Omni Server can be configured using environment variables, a `.env` file, or command-line arguments.
+
+#### Environment Variables
+
+Create a `.env` file in your project root:
+
+```bash
+# Cache directory for pre-computed KV caches
+MLX_OMNI_CACHE_DIRECTORY=/path/to/caches
+
+# Server configuration
+MLX_OMNI_HOST=0.0.0.0
+MLX_OMNI_PORT=10240
+MLX_OMNI_WORKERS=1
+MLX_OMNI_LOG_LEVEL=info
+
+# Optional: Default model
+MLX_OMNI_DEFAULT_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit
+```
+
+#### Configuration Priority
+
+Configuration is applied in the following order (highest to lowest priority):
+1. Command-line arguments
+2. Environment variables
+3. `.env` file
+4. Default values
 
 ### Basic Client Setup
 
@@ -190,6 +230,43 @@ curl http://localhost:10240/v1/chat/completions \
         "content": "Hello!"
       }
     ]
+  }'
+```
+
+</details>
+
+#### Chat Completion with Pre-computed Cache
+
+MLX Omni Server supports using pre-computed KV caches for faster inference. This is especially useful for long contexts or system prompts that are used repeatedly.
+
+```python
+# Using a pre-computed cache with the model@cache_path syntax
+response = client.chat.completions.create(
+    model="mlx-community/Llama-3.2-3B-Instruct-4bit@/path/to/cache.safetensors",
+    messages=[{"role": "user", "content": "Based on the context, what happened in 1974?"}],
+    max_tokens=100
+)
+
+# The cache provides the context, so you only need to ask the question
+print(response.choices[0].message.content)
+```
+
+<details>
+<summary>Cache Management Examples</summary>
+
+```bash
+# List available caches
+curl http://localhost:10240/v1/caches
+
+# Get information about a specific cache
+curl http://localhost:10240/v1/caches/my_context_cache
+
+# Validate cache compatibility with a model
+curl -X POST http://localhost:10240/v1/caches/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_id": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+    "cache_path": "/path/to/cache.safetensors"
   }'
 ```
 
@@ -317,6 +394,52 @@ curl http://localhost:10240/v1/embeddings \
 
 For more detailed examples, check out the [examples](examples) directory.
 
+## Working with KV Caches
+
+MLX Omni Server includes powerful tools for working with KV (Key-Value) caches to accelerate inference:
+
+### Creating Pre-computed Caches
+
+Use the included `text_to_kv_cache.py` tool to create caches from text files:
+
+```bash
+# Process text files and create KV caches
+python ai_help/text_to_kv_cache.py \
+  --input-dir /path/to/text/files \
+  --model mlx-community/Llama-3.2-3B-Instruct-4bit \
+  --max-tokens 2048
+
+# This creates:
+# - .safetensors cache files for each text
+# - .synthesis.xml files with metadata and analysis
+```
+
+### Interactive Chat with Cache
+
+Use `mlx_chat.py` for interactive conversations with cache support:
+
+```bash
+# Start chat with a pre-computed cache
+python ai_help/mlx_chat.py \
+  --model mlx-community/Llama-3.2-3B-Instruct-4bit \
+  --load-cache \
+  --cache-file /path/to/cache.safetensors \
+  --stream
+
+# Create a new cache from a prompt file
+python ai_help/mlx_chat.py \
+  --model mlx-community/Llama-3.2-3B-Instruct-4bit \
+  --prompt-file system_prompt.txt \
+  --save-cache
+```
+
+### Cache Benefits
+
+- **Faster Response Times**: Pre-computed attention for long contexts
+- **Consistent Context**: Share the same context across multiple conversations
+- **Resource Efficiency**: Reduce computation for repeated prompts
+- **Scalability**: Serve multiple users with the same cached context
+
 ## FAQ
 
 
@@ -358,6 +481,26 @@ response = client.chat.completions.create(
     messages=[{"role": "user", "content": "Hello"}]
 )
 ```
+
+### How do I use pre-computed caches?
+
+You can use pre-computed caches by appending the cache path to the model ID with an `@` symbol:
+
+```python
+# Format: model_id@cache_path
+response = client.chat.completions.create(
+    model="mlx-community/Llama-3.2-3B-Instruct-4bit@/path/to/cache.safetensors",
+    messages=[{"role": "user", "content": "What is the main topic discussed?"}]
+)
+```
+
+### Where are caches stored?
+
+By default, caches are stored in the `./caches` directory. You can change this by:
+
+1. Setting the environment variable: `MLX_OMNI_CACHE_DIRECTORY=/your/path`
+2. Using command line: `mlx-omni-server --cache-dir /your/path`
+3. Adding to `.env` file: `MLX_OMNI_CACHE_DIRECTORY=/your/path`
 
 
 ### Can I use TestClient for development?
